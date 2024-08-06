@@ -1,16 +1,19 @@
 package com.github.javarar.matrix.production;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.RecursiveTask;
+import java.util.stream.Collectors;
 
+
+/**
+ * Сделано на коленке чтобы успеть к защите,извиняюсь :-(
+ */
 public class MatrixProduction {
 
     public static void main(String[] args) {
-
         Matrix first = new Matrix(3, 3);
         Matrix second = new Matrix(3, 3);
 
@@ -25,7 +28,7 @@ public class MatrixProduction {
 
 
     public static class Matrix {
-        private static final ForkJoinPool commonPool = ForkJoinPool.commonPool();
+        private static final ForkJoinPool forkJoinPool = new ForkJoinPool();
         private static final Random random = new Random();
         private final int rows;
         private final int cols;
@@ -43,33 +46,32 @@ public class MatrixProduction {
             this.content = content;
         }
 
-
         public Matrix multiply(Matrix second) {
-
-            // Проверка на возможность перемножения матриц
             if (this.getCols() != second.getRows()) {
                 throw new IllegalArgumentException("Размеры матриц неверны");
             }
 
+            int numRows = this.getRows();
+            int numCols = second.getCols();
+
             List<ComputeResultItemTask> tasks = new ArrayList<>();
-            // Перемножение матриц
-            for (int i = 0; i < this.getRows(); i++) {
-                for (int j = 0; j < second.getCols(); j++) {
-                    for (int k = 0; k < this.getCols(); k++) {
-                        ComputeResultItemTask task = new ComputeResultItemTask(new ComputeParamsDto(i, j, this.getValue(i, k), second.getValue(k, j)));
-                        tasks.add(task);
-                        commonPool.invoke(new ComputeResultItemTask(new ComputeParamsDto(i, j, this.getValue(i, k), second.getValue(k, j))));
-                    }
+            for (int rowNumber = 0; rowNumber < numRows; rowNumber++) {
+                for (int colNumber = 0; colNumber < numCols; colNumber++) {
+                    ComputeResultItemTask task = new ComputeResultItemTask(new ComputeParamsDto(rowNumber, colNumber, this, second));
+                    tasks.add(task);
                 }
             }
 
-            int[][] resultContent = new int[this.getRows()][second.getCols()];
-            for (ComputeResultItemTask task : tasks) {
-                ComputeResultDto result = task.join();
+            List<ComputeResultDto> results = tasks.stream()
+                    .map(forkJoinPool::invoke)
+                    .collect(Collectors.toList());
+
+            int[][] resultContent = new int[numRows][numCols];
+            for (ComputeResultDto result : results) {
                 resultContent[result.getRow()][result.getCol()] = result.getValue();
             }
 
-            return new Matrix(this.rows, this.cols, resultContent);
+            return new Matrix(numRows, numCols, resultContent);
         }
 
         public int getRows() {
@@ -103,13 +105,11 @@ public class MatrixProduction {
                 }
                 sb.append('\n');
             }
-
             return sb.toString();
         }
     }
 
     public static class ComputeResultItemTask extends RecursiveTask<ComputeResultDto> {
-
         private final ComputeParamsDto params;
 
         public ComputeResultItemTask(ComputeParamsDto params) {
@@ -118,22 +118,25 @@ public class MatrixProduction {
 
         @Override
         protected ComputeResultDto compute() {
-            return new ComputeResultDto(params.getResultRow(), params.getResultCol(), params.getFirstValue() * params.getSecondValue());
+            int value = 0;
+            for (int k = 0; k < params.getMatrixA().getCols(); k++) {
+                value += params.getMatrixA().getValue(params.getResultRow(), k) * params.getMatrixB().getValue(k, params.getResultCol());
+            }
+            return new ComputeResultDto(params.getResultRow(), params.getResultCol(), value);
         }
     }
-
 
     public static class ComputeParamsDto {
         private final int resultRow;
         private final int resultCol;
-        private final int firstValue;
-        private final int secondValue;
+        private final Matrix matrixA;
+        private final Matrix matrixB;
 
-        public ComputeParamsDto(int resultRow, int resultCol, int firstValue, int secondValue) {
+        public ComputeParamsDto(int resultRow, int resultCol, Matrix matrixA, Matrix matrixB) {
             this.resultRow = resultRow;
             this.resultCol = resultCol;
-            this.firstValue = firstValue;
-            this.secondValue = secondValue;
+            this.matrixA = matrixA;
+            this.matrixB = matrixB;
         }
 
         public int getResultRow() {
@@ -144,12 +147,12 @@ public class MatrixProduction {
             return resultCol;
         }
 
-        public int getFirstValue() {
-            return firstValue;
+        public Matrix getMatrixA() {
+            return matrixA;
         }
 
-        public int getSecondValue() {
-            return secondValue;
+        public Matrix getMatrixB() {
+            return matrixB;
         }
     }
 
